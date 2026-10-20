@@ -63,6 +63,10 @@ const OPENGW_GATEWAY_CONFIG_URL = "https://opengw.developer.huaweicloud.com/api/
 const PORTAL_AUTHORIZE_BASE = "https://codearts.huaweicloud.com/portal/authorize"
 const PORTAL_LOGIN_BASE = "https://codearts.huaweicloud.com/portal/login"
 const STS_TOKEN_ENDPOINT = "https://sts.cn-north-4.myhuaweicloud.com/v1/oauth2/tokens"
+// The CodeArts web chat, as the web client opens it. Signing in leaves the
+// browser here by default, so the tab that finished the OAuth flow lands on
+// the product instead of the portal's bare login-result page.
+const CHAT_HOME_URL = "https://devcloud.cn-north-4.huaweicloud.com/chat/home"
 
 // OAuth client id (equals the plugin's URI scheme) and local callback path.
 const CLIENT_ID = "codearts-agent"
@@ -474,8 +478,43 @@ async function pollForCredential(ticketId, secret, fetcher) {
   throw new Error("CodeArts login timed out")
 }
 
+/** Is `value` an absolute http(s) URL? */
+function isHttpUrl(value) {
+  try {
+    const url = new URL(value)
+    return url.protocol === "http:" || url.protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
+// The choices the OAuth method asks before opening the browser. magpie's
+// plugin options are on/off switches only, so a select lives here, as part
+// of the sign-in question flow.
+const POST_LOGIN_CHOICES = [
+  { label: "码道聊天首页", value: "chat", hint: CHAT_HOME_URL },
+  { label: "官方登录结果页", value: "portal", hint: "codearts.huaweicloud.com/portal/login" },
+  { label: "自定义 URL…", value: "custom", hint: "任意 http/https 地址" },
+]
+
+/**
+ * Where the browser goes after the callback has the credentials. `inputs`
+ * are the answers to the method's prompts; a host that asks none (OpenCode
+ * on an older version) lands on the chat homepage, as the default choice.
+ */
+function postLoginRedirect(inputs) {
+  const choice = firstOf(inputs?.post_login)
+  if (choice === "portal") return buildPortalLoginResultUrl(true)
+  if (choice === "custom") {
+    const custom = firstOf(inputs?.post_login_url)
+    if (isHttpUrl(custom)) return custom
+  }
+  return CHAT_HOME_URL
+}
+
 /** Start the loopback callback server, listening on 127.0.0.1:port>=10000. */
-function startOAuthCallbackServer(ticketId, pkce, keyPair, fetcher) {
+function startOAuthCallbackServer(ticketId, pkce, keyPair, fetcher, successRedirect) {
+  const landing = successRedirect || CHAT_HOME_URL
   let resolveResult
   let rejectResult
   const result = new Promise((resolve, reject) => {
@@ -499,7 +538,7 @@ function startOAuthCallbackServer(ticketId, pkce, keyPair, fetcher) {
     // with a secret; poll the ticket endpoint in the background.
     const callbackSecret = url.searchParams.get("secret")
     if (callbackSecret) {
-      const redirectTo = url.searchParams.get("redirect") ?? buildPortalLoginResultUrl(true)
+      const redirectTo = url.searchParams.get("redirect") ?? landing
       response.writeHead(307, { ...CORS_HEADERS, Location: redirectTo }).end()
       void pollForCredential(ticketId, callbackSecret, fetcher).then(done, rejectResult)
       return
@@ -510,7 +549,7 @@ function startOAuthCallbackServer(ticketId, pkce, keyPair, fetcher) {
       const port = request.socket.localPort ?? 0
       void exchangeAuthorizationCode(code, pkce.codeVerifier, port, keyPair, fetcher).then(
         (token) => {
-          response.writeHead(307, { ...CORS_HEADERS, Location: buildPortalLoginResultUrl(true) }).end()
+          response.writeHead(307, { ...CORS_HEADERS, Location: landing }).end()
           done(credentialFromTokenResponse(token, pkce.codeVerifier, keyPair))
         },
         (error) => {
@@ -550,11 +589,13 @@ function listenOnCallbackPort(server) {
  * The result resolves once the browser is redirected back and STS answers;
  * the callback server is closed as soon as the result settles.
  */
-async function startOAuthFlow(fetcher) {
+async function startOAuthFlow(fetcher, successRedirect) {
   const ticketId = randomHex(32)
   const pkce = await generatePkcePair()
   const keyPair = await generateDpopKeyPair()
-  const { port, server, result } = await startOAuthCallbackServer(ticketId, pkce, keyPair, fetcher)
+  const { port, server, result } = await startOAuthCallbackServer(
+    ticketId, pkce, keyPair, fetcher, successRedirect,
+  )
   const loginUrl = buildOAuthLoginUrl(port, pkce, ticketId)
 
   let closed = false
@@ -1174,11 +1215,31 @@ export const CodeArtsAuthPlugin = async ({ client } = {}, options = {}) => {
         {
           type: "oauth",
           label: "Sign in with Huawei Cloud",
-          async authorize() {
-            const flow = await startOAuthFlow(fetcher)
+          prompts: [
+            {
+              key: "post_login",
+              type: "select",
+              message: "登录成功后，浏览器打开哪个页面？",
+              options: POST_LOGIN_CHOICES,
+            },
+            {
+              key: "post_login_url",
+              type: "text",
+              message: "自定义跳转地址",
+              placeholder: "https://example.com/",
+              when: { key: "post_login", value: "custom", op: "eq" },
+              validate(value) {
+                const url = String(value ?? "").trim()
+                if (!url) return "请输入一个地址"
+                return isHttpUrl(url) ? null : "请填写 http:// 或 https:// 开头的完整地址"
+              },
+            },
+          ],
+          async authorize(inputs = {}) {
+            const flow = await startOAuthFlow(fetcher, postLoginRedirect(inputs))
             return {
               url: flow.loginUrl,
-              instructions: "Sign in to Huawei Cloud in the browser; this window closes itself when done.",
+              instructions: "Sign in to Huawei Cloud in the browser; when done you land on the page you chose.",
               method: "auto",
               async callback() {
                 try {
@@ -1231,6 +1292,7 @@ export const _internal = {
   SNAP_OPS_DELIVERY_URL, SNAP_OPS_CLAIM_URL, SNAP_OPS_CONFIRM_URL, OPS_CHANNEL,
   OPS_UNSIGNED_HEADERS, DAILY_LOGIN_TYPES, CHECKIN_CLAIMED_STATUS, CHECKIN_DONE_STATUSES,
   PORTAL_AUTHORIZE_BASE, STS_TOKEN_ENDPOINT, CLIENT_ID, REDIRECT_PATH,
+  CHAT_HOME_URL, POST_LOGIN_CHOICES, isHttpUrl, postLoginRedirect,
   firstOf, asRecord, safeJson, num, clamp, prettify, normalizeModelId, formatCredit,
   b64url, utf8, sha256Hex, hmacSha256Hex,
   generatePkcePair, generateDpopKeyPair, keyPairFromStoredJwk, signDpopJws,

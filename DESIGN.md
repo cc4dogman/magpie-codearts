@@ -86,6 +86,14 @@ SDK-HMAC-SHA256 签名，凭据由 OAuth 换取。因此本插件的 auth 与签
      SDK-HMAC-SHA256 签名；`Agent-Type: PromptCenter` / `X-Language` 只追加、
      不参与签名（参与签名会得到 `401 APIG.0301`）。
 
+8. **登录后落点可选（新增）**
+   - OAuth 方法的 `prompts` 先问「登录成功后浏览器打开哪个页面」：码道聊天首页
+     （默认）、官方登录结果页、或自定义 `http(s)` URL（用 `when` 条件追问并校验）。
+   - 回调服务器换到 STS 凭据后，307 的 `Location` 用所选地址（取代原来的
+     `portal/login?login_succeed=true`）；失败仍回官方失败页。
+   - magpie 的插件设置项目前只有 Off/On 开关，没有下拉框/文本框，因此选择放在
+     登录提问里，而不是 Settings；未提问的宿主（旧版 OpenCode）默认落在聊天首页。
+
 ## 三、实现步骤
 
 1. 建包（本仓库为单包，插件直接放在仓库根目录），`package.json` 声明
@@ -98,7 +106,8 @@ SDK-HMAC-SHA256 签名，凭据由 OAuth 换取。因此本插件的 auth 与签
      `usage` 汇报用量。
 3. `README.md` 写安装 / 登录 / 使用 / 已知限制。
 4. `index.test.mjs` 覆盖签名、PKCE/DPoP、凭据往返、远端列表、loader 签名、
-   续期、用量、签到状态机、回调服务器，全程不联网（`node --test`，39 项）。
+   续期、用量、签到状态机、登录后落点选择、回调服务器，全程不联网
+   （`node --test`，42 项）。
 5. `registry-entry.json` 提供加入 `magpie` 插件市场的登记项。
 
 ## 四、目录

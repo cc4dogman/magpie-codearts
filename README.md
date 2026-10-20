@@ -4,7 +4,7 @@
 [![magpie plugin](https://img.shields.io/badge/magpie-plugin-8A2BE2)](https://usemagpie.ai/docs/zh/plugins)
 [![OpenCode plugin](https://img.shields.io/badge/OpenCode-plugin-blue)](https://opencode.ai)
 ![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-![tests](https://img.shields.io/badge/tests-39%20passing-success)
+![tests](https://img.shields.io/badge/tests-42%20passing-success)
 
 [Huawei Cloud CodeArts (华为云码道 代码智能体)](https://www.huaweicloud.com/product/codearts.html)  
 作为 magpie / OpenCode 的 provider 插件：用**华为云 OAuth 授权登录**接入码道的模型  
@@ -42,9 +42,17 @@ magpie plugin add ./index.mjs
 
 ## 登录
 
-选择 **Sign in with Huawei Cloud**，浏览器会打开华为云授权页；登录并在授权页确认  
-后，浏览器会自动跳回本机的回调地址，插件随即完成登录。无需填写 API Key、也无需  
-手动复制任何 token。
+选择 **Sign in with Huawei Cloud** 后，magpie 会先问「登录成功后打开哪个页面」：
+
+-   **码道聊天首页**（默认）：`https://devcloud.cn-north-4.huaweicloud.com/chat/home`；
+-   **官方登录结果页**：保持原来的 `portal/login?login_succeed=true`；
+-   **自定义 URL…**：再输入一个 `http://` / `https://` 地址。
+
+浏览器会打开华为云授权页；登录并在授权页确认后，浏览器会自动跳回本机的回调地址，  
+插件完成登录，然后浏览器落在你选的页面。无需填写 API Key、也无需手动复制任何 token。
+
+> 说明：magpie 的插件设置项目前只支持 Off/On 开关，所以这个选择放在登录提问里  
+> （原生 `select` + 文本输入），而不是 Settings 里的下拉框。每次重新登录都可以改选。
 
 ## 使用
 
@@ -86,6 +94,9 @@ Token 计费账号不在活动范围内，会返回 `ineligible`。
     （`usageTotalPackageCredit`），把已用比例显示为一条「total credits」窗口；  
     取不到时在用量卡片显示一条错误，不影响对话。
 -   **区域 / 端点**：当前固定华为云 `cn-north-4`（与真实插件一致）。
+-   **登录后跳转**：聊天首页用的是 DevCloud 自己的 Web 会话；同属华为云 IAM，通常  
+    会 SSO 自动登录，但如果浏览器没有现成的 DevCloud 会话，页面可能先跳一次登录。  
+    这只影响浏览器停留的页面，不影响插件已经拿到的 AK/SK 凭据。
 -   本插件不内置 MCP / 中间件，仅做模型接入。
 -   依赖：无（签名、PKCE、DPoP 都用运行时内置的 WebCrypto，无需 `jose` 等三方库）。
 
@@ -108,9 +119,14 @@ magpie plugin add yuweihao17/codearts
 
 ### Sign in
 
-Pick **Sign in with Huawei Cloud** (or run `magpie plugin login codearts`). Your browser opens the
-Huawei Cloud consent page; after you approve, it redirects back to a local `127.0.0.1` callback and
-the plugin finishes signing in. No API key, no copy-paste.
+Pick **Sign in with Huawei Cloud** (or run `magpie plugin login codearts`). magpie first asks
+where the browser should land after the sign-in — the CodeArts chat homepage (default), the
+official portal login-result page, or a custom `http(s)` URL. Your browser then opens the
+Huawei Cloud consent page; after you approve, it redirects back to a local `127.0.0.1` callback,
+the plugin finishes signing in, and the tab lands on the page you chose. No API key, no copy-paste.
+
+> magpie's plugin options are Off/On switches only, so this choice is a native `select` prompt
+> in the sign-in flow rather than a dropdown in Settings; it can be changed at every sign-in.
 
 ### Use
 

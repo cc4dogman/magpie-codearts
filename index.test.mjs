@@ -568,6 +568,66 @@ test("dailyCampaign prefers USER_LOGIN and ignores non-credit units", () => {
   assert.equal(x.dailyCampaign([{ campaignId: 2, type: "STUDENT_CERTIFIED" }]), undefined)
 })
 
+// ---- post-login page choice -------------------------------------------------
+
+test("postLoginRedirect maps the sign-in choice to a landing URL", () => {
+  assert.equal(x.postLoginRedirect({}), x.CHAT_HOME_URL)
+  assert.equal(x.postLoginRedirect({ post_login: "chat" }), x.CHAT_HOME_URL)
+  assert.equal(
+    x.postLoginRedirect({ post_login: "portal" }),
+    "https://codearts.huaweicloud.com/portal/login?login_succeed=true&uri_scheme=codearts-agent&locale=zh-cn",
+  )
+  assert.equal(
+    x.postLoginRedirect({ post_login: "custom", post_login_url: "https://example.com/done" }),
+    "https://example.com/done",
+  )
+  // An invalid or empty custom URL falls back to the chat homepage.
+  assert.equal(x.postLoginRedirect({ post_login: "custom", post_login_url: "ftp://x" }), x.CHAT_HOME_URL)
+  assert.equal(x.postLoginRedirect({ post_login: "custom" }), x.CHAT_HOME_URL)
+})
+
+test("the OAuth method asks where to land and validates a custom URL", async () => {
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, {})
+  const method = plugin.auth.methods[0]
+  const [choice, custom] = method.prompts
+  assert.equal(choice.type, "select")
+  assert.deepEqual(choice.options.map((o) => o.value), ["chat", "portal", "custom"])
+  assert.deepEqual(choice.options[0].hint, x.CHAT_HOME_URL)
+  assert.equal(custom.type, "text")
+  assert.deepEqual(custom.when, { key: "post_login", value: "custom", op: "eq" })
+  assert.equal(custom.validate(""), "请输入一个地址")
+  assert.equal(custom.validate("ftp://example.com"), "请填写 http:// 或 https:// 开头的完整地址")
+  assert.equal(custom.validate("https://example.com/x"), null)
+})
+
+test("authorize lands the browser on the chosen page after the code exchange", async () => {
+  const fetcher = async (url) => {
+    if (String(url) === x.STS_TOKEN_ENDPOINT) {
+      return new Response(JSON.stringify({
+        credentials: {
+          access_key_id: "AK", secret_access_key: "SK", security_token: "ST",
+          expiration: "2030-01-01T00:00:00Z",
+        },
+        refresh_token: "R",
+      }), { status: 200 })
+    }
+    return new Response("", { status: 200 })
+  }
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+  const flow = await plugin.auth.methods[0].authorize({
+    post_login: "custom",
+    post_login_url: "https://example.com/after-login",
+  })
+  const port = Number(new URL(flow.url).searchParams.get("port"))
+  const res = await fetch(`http://127.0.0.1:${port}/oauth/callback?code=abc`, { redirect: "manual" })
+  assert.equal(res.status, 307)
+  assert.equal(res.headers.get("location"), "https://example.com/after-login")
+
+  const outcome = await flow.callback()
+  assert.equal(outcome.type, "success")
+  assert.equal(JSON.parse(outcome.access).access_key_id, "AK")
+})
+
 // ---- OAuth callback server -------------------------------------------------
 
 test("startOAuthFlow serves a callback server and a valid login URL", async () => {
