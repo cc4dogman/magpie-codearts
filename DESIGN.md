@@ -100,7 +100,9 @@ SDK-HMAC-SHA256 签名，凭据由 OAuth 换取。因此本插件的 auth 与签
    `magpie` 元数据与 `type: module`。
 2. `index.mjs` 导出插件函数 `CodeArtsAuthPlugin({ client }, options)`，返回
    `{ config, provider, auth }`：
-   - `config`：用 `??=` 注册 `codearts` provider 与 `CATALOG` 模型，不覆盖用户配置。
+   - `config`：provider 与 `CATALOG` 模型用 `??=` 注册，不覆盖用户配置；显示名只在
+     为空或等于旧默认值 `CodeArts` 时替换为 `CodeArts (magpie-codearts)`。
+     Provider id 保持 `codearts`（登录态不变），与旧的 `yuweihao17/codearts` 插件区分。
    - `provider.models`：签名拉取两个远端端点，失败回退目录。
    - `auth`：`methods` 提供 OAuth 登录，`loader` 签名请求，`refresh` 续期，
      `usage` 汇报用量。

@@ -1,6 +1,6 @@
 {
-  "package": "opencode-codearts-auth",
-  "name": "CodeArts",
+  "package": "magpie-codearts",
+  "name": "magpie-codearts",
   "icon": "https://cdn.jsdelivr.net/npm/simple-icons@13/icons/huawei.svg",
   "providers": ["codearts"],
   "community": true,

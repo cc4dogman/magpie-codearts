@@ -37,6 +37,10 @@
 import { createServer } from "node:http"
 
 const PROVIDER = "codearts"
+// The provider id stays `codearts` so existing sign-ins keep working; the
+// display name carries the project name so this plugin is not mistaken for
+// the older `yuweihao17/codearts` package in Providers and Usage.
+const PROVIDER_NAME = "CodeArts (magpie-codearts)"
 const NPM = "@ai-sdk/openai-compatible" // chat completions
 
 // ---- endpoints & flow constants --------------------------------------------
@@ -1103,7 +1107,9 @@ export const CodeArtsAuthPlugin = async ({ client } = {}, options = {}) => {
       config.provider ??= {}
       config.provider[PROVIDER] ??= {}
       const p = config.provider[PROVIDER]
-      p.name ??= "CodeArts"
+      // Replace only the old package's default name; a name the user chose
+      // stays as it is.
+      if (!p.name || p.name === "CodeArts") p.name = PROVIDER_NAME
       p.npm ??= NPM
       p.api ??= CHAT_API_BASE
       p.models = { ...Object.fromEntries(CATALOG.map((m) => [m.id, configModel(m)])), ...(p.models ?? {}) }
@@ -1287,7 +1293,7 @@ async function persistCredential(client, cred) {
 
 // for tests (never a plugin: magpie only calls exported functions)
 export const _internal = {
-  PROVIDER, NPM, CATALOG, CONTEXT_WINDOWS, BENEFIT_MODEL_FALLBACK,
+  PROVIDER, PROVIDER_NAME, NPM, CATALOG, CONTEXT_WINDOWS, BENEFIT_MODEL_FALLBACK,
   CHAT_API_BASE, SNAP_MODEL_BUILTIN_URL, SNAP_STATISTICS_URL, OPENGW_GATEWAY_CONFIG_URL,
   SNAP_OPS_DELIVERY_URL, SNAP_OPS_CLAIM_URL, SNAP_OPS_CONFIRM_URL, OPS_CHANNEL,
   OPS_UNSIGNED_HEADERS, DAILY_LOGIN_TYPES, CHECKIN_CLAIMED_STATUS, CHECKIN_DONE_STATUSES,

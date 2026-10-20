@@ -1,4 +1,4 @@
-# opencode-codearts-auth
+# magpie-codearts
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![magpie plugin](https://img.shields.io/badge/magpie-plugin-8A2BE2)](https://usemagpie.ai/docs/zh/plugins)
@@ -12,7 +12,8 @@
 
 CodeArts 的模型网关确实是 OpenAI 兼容的 Chat Completions 接口，但它**不接受 API  
 Key**：请求要用临时的 AK/SK/security-token 凭据做 *SDK-HMAC-SHA256* 签名，而这些  
-凭据要靠 OAuth 登录取得。本插件完整实现了这条链路：
+凭据要靠 OAuth 登录取得。Provider id 保持 `codearts`（现有登录态继续有效），显示名  
+是 **CodeArts (magpie-codearts)**，用来和旧的 `yuweihao17/codearts` 插件区分。本插件完整实现了这条链路：
 
 1.  **OAuth（PKCE + DPoP）登录**：`authorize()` 在本机 `127.0.0.1`（端口 ≥ 10000）  
     起一个回调服务器，返回华为云授权页地址给 magpie 打开；浏览器带授权码跳回后，  
@@ -29,7 +30,7 @@ Key**：请求要用临时的 AK/SK/security-token 凭据做 *SDK-HMAC-SHA256* �
 ## 安装
 
 ```sh
-magpie plugin add yuweihao17/codearts
+magpie plugin add cc4dogman/magpie-codearts
 
 ```
 
@@ -102,7 +103,7 @@ Token 计费账号不在活动范围内，会返回 `ineligible`。
 
 ## English
 
-**opencode-codearts-auth** is a magpie / OpenCode provider plugin that signs you in to
+**magpie-codearts** is a magpie / OpenCode provider plugin that signs you in to
 [Huawei Cloud CodeArts (码道)](https://www.huaweicloud.com/product/codearts.html) with
 **Huawei Cloud OAuth** (PKCE + DPoP) and exposes its models (openPangu, DeepSeek, GLM, …).
 
@@ -114,7 +115,7 @@ local-callback PKCE OAuth, per-request SDK-HMAC-SHA256 signing, silent refresh �
 ### Install
 
 ```sh
-magpie plugin add yuweihao17/codearts
+magpie plugin add cc4dogman/magpie-codearts
 ```
 
 ### Sign in

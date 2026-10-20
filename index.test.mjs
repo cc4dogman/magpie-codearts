@@ -279,6 +279,7 @@ test("plugin exposes config, provider.models, and an oauth auth method", async (
   const config = {}
   await plugin.config(config)
   const p = config.provider.codearts
+  assert.equal(p.name, "CodeArts (magpie-codearts)")
   assert.equal(p.npm, "@ai-sdk/openai-compatible")
   assert.equal(p.api, x.CHAT_API_BASE)
   assert.ok(p.models["GLM-5.2"])

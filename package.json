@@ -1,7 +1,7 @@
 {
-  "name": "opencode-codearts-auth",
-  "version": "0.3.0",
-  "description": "OpenCode provider plugin: Huawei Cloud CodeArts (码道 代码智能体) models via OAuth sign-in, with daily check-in",
+  "name": "magpie-codearts",
+  "version": "0.4.0",
+  "description": "magpie provider plugin: Huawei Cloud CodeArts (码道 代码智能体) models via OAuth sign-in, with daily check-in",
   "type": "module",
   "main": "./index.mjs",
   "exports": "./index.mjs",
@@ -13,11 +13,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yuweihao17/codearts.git"
+    "url": "git+https://github.com/cc4dogman/magpie-codearts.git"
   },
-  "homepage": "https://github.com/yuweihao17/codearts#readme",
+  "homepage": "https://github.com/cc4dogman/magpie-codearts#readme",
   "bugs": {
-    "url": "https://github.com/yuweihao17/codearts/issues"
+    "url": "https://github.com/cc4dogman/magpie-codearts/issues"
   },
   "magpie": {
     "maxConcurrency": 4,
