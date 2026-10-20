@@ -1,6 +1,6 @@
 {
   "name": "magpie-codearts",
-  "version": "0.4.2",
+  "version": "0.2.1",
   "description": "magpie provider plugin: Huawei Cloud CodeArts (码道 代码智能体) models via OAuth sign-in, with daily check-in",
   "type": "module",
   "main": "./index.mjs",
