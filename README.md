@@ -4,7 +4,7 @@
 [![magpie plugin](https://img.shields.io/badge/magpie-plugin-8A2BE2)](https://usemagpie.ai/docs/zh/plugins)
 [![OpenCode plugin](https://img.shields.io/badge/OpenCode-plugin-blue)](https://opencode.ai)
 ![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-![tests](https://img.shields.io/badge/tests-42%20passing-success)
+![tests](https://img.shields.io/badge/tests-46%20passing-success)
 
 [Huawei Cloud CodeArts (华为云码道 代码智能体)](https://www.huaweicloud.com/product/codearts.html)  
 作为 magpie / OpenCode 的 provider 插件：用**华为云 OAuth 授权登录**接入码道的模型  
@@ -92,8 +92,10 @@ Token 计费账号不在活动范围内，会返回 `ineligible`。
     `InferHub.002002009.404 model is not registered`。插件会从 `gateway/config`  
     动态识别这批模型，冷启动时用静态兜底集合。
 -   **用量**是尽力而为：读取 `snap-manager/v1/statistics/plugin` 的积分口径  
-    （`usageTotalPackageCredit`），把已用比例显示为一条「total credits」窗口；  
-    取不到时在用量卡片显示一条错误，不影响对话。
+    （`usageTotalPackageCredit`），把每个积分包显示成一条窗口；同时读
+    `snap-manager/v1/current/user` 取账号名，用量卡片上显示的就是这个名字  
+    （登录时也会写入账号，旧账号在第一次读用量时补上）。取不到时在用量卡片显示  
+    一条错误，不影响对话。
 -   **区域 / 端点**：当前固定华为云 `cn-north-4`（与真实插件一致）。
 -   **登录后跳转**：聊天首页用的是 DevCloud 自己的 Web 会话；同属华为云 IAM，通常  
     会 SSO 自动登录，但如果浏览器没有现成的 DevCloud 会话，页面可能先跳一次登录。  

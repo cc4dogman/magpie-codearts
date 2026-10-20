@@ -388,6 +388,81 @@ test("auth.usage reports the plan's credit window", async () => {
   ])
 })
 
+test("auth.usage names the account from /current/user", async () => {
+  const cred = await makeCred()
+  const fetcher = async (url) => {
+    const target = String(url)
+    if (target.endsWith("/snap-manager/v1/current/user")) {
+      return new Response(JSON.stringify({
+        user_id: "uid-1", user_name: "hid__name", domain_name: "hid__domain",
+      }), { status: 200 })
+    }
+    return new Response(JSON.stringify({
+      package: { package_name_cn: "体验版" },
+      metrics: [{ name: "usageTotalPackageCredit", package_credit_amount: 7500, package_credit_remain: 7500 }],
+    }), { status: 200 })
+  }
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+  const usage = await plugin.auth.usage(async () => makeAuth(cred))
+  assert.equal(usage.user, "hid__name")
+  assert.equal(usage.plan, "体验版")
+})
+
+test("auth.usage still reports the windows when the name can't be read", async () => {
+  const cred = await makeCred()
+  const fetcher = async (url) => {
+    if (String(url).endsWith("/current/user")) return new Response("nope", { status: 404 })
+    return new Response(JSON.stringify({
+      metrics: [{ name: "usageTotalPackageCredit", package_credit_amount: 1000, package_credit_remain: 500 }],
+    }), { status: 200 })
+  }
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+  const usage = await plugin.auth.usage(async () => makeAuth(cred))
+  assert.equal(usage.user, undefined)
+  assert.equal(usage.windows[0].display, "500 / 1000")
+})
+
+test("fetchAccountName prefers the user name, then the domain, then the id", async () => {
+  const cred = { access_key_id: "AK", secret_access_key: "SK", security_token: "ST" }
+  const reply = (body) => async () => new Response(JSON.stringify(body), { status: 200 })
+  assert.equal(
+    await x.fetchAccountName(cred, reply({ user_name: "u", domain_name: "d", user_id: "i" })),
+    "u",
+  )
+  assert.equal(await x.fetchAccountName(cred, reply({ domain_name: "d", user_id: "i" })), "d")
+  assert.equal(await x.fetchAccountName(cred, reply({ user_id: "i" })), "i")
+  assert.equal(await x.fetchAccountName(cred, async () => new Response("", { status: 500 })), "")
+})
+
+test("the sign-in stores the account's name so magpie can label it", async () => {
+  const calls = []
+  const fetcher = async (url) => {
+    const target = String(url)
+    if (target === x.STS_TOKEN_ENDPOINT) {
+      return new Response(JSON.stringify({
+        credentials: {
+          access_key_id: "AK", secret_access_key: "SK", security_token: "ST",
+          expiration: "2030-01-01T00:00:00Z",
+        },
+        refresh_token: "R",
+      }), { status: 200 })
+    }
+    if (target.endsWith("/snap-manager/v1/current/user")) {
+      return new Response(JSON.stringify({ user_name: "hid__19kqfm0ho" }), { status: 200 })
+    }
+    return new Response("", { status: 200 })
+  }
+  const client = { auth: { set: async (opts) => { calls.push(opts) } } }
+  const plugin = await CodeArtsAuthPlugin({ client }, { fetch: fetcher })
+  const flow = await plugin.auth.methods[0].authorize({})
+  const port = Number(new URL(flow.url).searchParams.get("port"))
+  await fetch(`http://127.0.0.1:${port}/oauth/callback?code=abc`).catch(() => {})
+  const outcome = await flow.callback()
+  assert.equal(outcome.type, "success")
+  assert.equal(outcome.accountId, "hid__19kqfm0ho")
+  assert.equal(JSON.parse(outcome.access).user_name, "hid__19kqfm0ho")
+})
+
 // ---- daily check-in --------------------------------------------------------
 
 const dailyItem = (over = {}) => ({

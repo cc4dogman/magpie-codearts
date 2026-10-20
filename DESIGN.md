@@ -66,6 +66,9 @@ SDK-HMAC-SHA256 签名，凭据由 OAuth 换取。因此本插件的 auth 与签
      /v1/model/builtin`（常规模型）；对 `-VL` 视觉模型过滤，并去掉末尾 `-NNNN`
      日期后缀。
    - `usage` 读 `statistics/plugin` 的积分口径，映射为 magpie 的 `{plan, windows}`。
+   - 账号名读 `snap-manager/v1/current/user`：`usage` 返回 `user`，登录成功时也写进
+     凭据（`user_name`）并作为 `accountId` 返回。magpie 用 `accountId` 给账号命名，
+     缺了它每个账号都显示成通用的 "Signed in"。
 
 6. **零依赖**
    - 签名与 PKCE/DPoP 全部用运行时内置 WebCrypto（`globalThis.crypto.subtle`）
@@ -108,8 +111,8 @@ SDK-HMAC-SHA256 签名，凭据由 OAuth 换取。因此本插件的 auth 与签
      `usage` 汇报用量。
 3. `README.md` 写安装 / 登录 / 使用 / 已知限制。
 4. `index.test.mjs` 覆盖签名、PKCE/DPoP、凭据往返、远端列表、loader 签名、
-   续期、用量、签到状态机、登录后落点选择、回调服务器，全程不联网
-   （`node --test`，42 项）。
+   续期、用量、账号名读取、签到状态机、登录后落点选择、回调服务器，全程不联网
+   （`node --test`，46 项）。
 5. `registry-entry.json` 提供加入 `magpie` 插件市场的登记项。
 
 ## 四、目录

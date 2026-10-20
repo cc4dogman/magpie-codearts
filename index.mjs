@@ -52,6 +52,10 @@ const CHAT_API_BASE = "https://snap-access.cn-north-4.myhuaweicloud.com/api/v2"
 const SNAP_HOST = "https://snap-access.cn-north-4.myhuaweicloud.com"
 const SNAP_MODEL_BUILTIN_URL = `${SNAP_HOST}/v1/model/builtin`
 const SNAP_STATISTICS_URL = `${SNAP_HOST}/snap-manager/v1/statistics/plugin`
+// The signed-in account's own id/name. magpie names an account by the
+// `accountId` a sign-in returns, so without this every account reads as a
+// generic "Signed in".
+const SNAP_CURRENT_USER_URL = `${SNAP_HOST}/snap-manager/v1/current/user`
 const CREDENTIAL_ENDPOINT = `${SNAP_HOST}/snap-manager/v1/login/ticket`
 // Daily check-in ("每日签到领积分") is an ops campaign, not a plain sign-in:
 // read the activity list, claim the daily one, then confirm it. Note the
@@ -1188,12 +1192,16 @@ export const CodeArtsAuthPlugin = async ({ client } = {}, options = {}) => {
         const cred = credentialOf(auth)
         if (!cred?.access_key_id) return { error: "not signed in", windows: [] }
         try {
-          const text = await signedGet(SNAP_STATISTICS_URL, cred, fetcher, {
-            "Agent-Type": "PromptCenter",
-            "X-Language": "zh-cn",
-          })
-          if (text === undefined) return { error: "CodeArts answered an error", windows: [] }
-          return usageFromStatistics(safeJson(text))
+          const [text, user] = await Promise.all([
+            signedGet(SNAP_STATISTICS_URL, cred, fetcher, OPS_UNSIGNED_HEADERS),
+            accountNameOf(cred, fetcher, client),
+          ])
+          if (text === undefined) return { error: "CodeArts answered an error", windows: [], ...(user ? { user } : {}) }
+          const usage = usageFromStatistics(safeJson(text))
+          // magpie shows this on the account's card and uses it to tell two
+          // accounts apart, so an account signed in before the name was
+          // read gets one on its next usage read.
+          return { ...usage, ...(user ? { user } : {}) }
         } catch (e) {
           return { error: e?.message ?? String(e), windows: [] }
         }
@@ -1252,7 +1260,13 @@ export const CodeArtsAuthPlugin = async ({ client } = {}, options = {}) => {
                   const outcome = await flow.result
                   const cred = safeJson(outcome.access)
                   if (!cred?.access_key_id) return { type: "failed", error: "CodeArts did not return a credential" }
-                  const accountId = firstOf(cred.user_name, cred.user_id)
+                  // Kept in the credential too, so a later usage read and a
+                  // refresh still name the account.
+                  const accountId = await accountNameOf(cred, fetcher, client)
+                  if (accountId && !cred.user_name) {
+                    cred.user_name = accountId
+                    outcome.access = JSON.stringify(cred)
+                  }
                   return {
                     type: "success",
                     access: outcome.access,
@@ -1274,6 +1288,33 @@ export const CodeArtsAuthPlugin = async ({ client } = {}, options = {}) => {
   }
 }
 
+/**
+ * The signed-in account's name, as CodeArts knows it. Best effort: a failure
+ * leaves the credential usable and only costs the account's display name.
+ */
+async function fetchAccountName(cred, fetcher) {
+  try {
+    const text = await signedGet(SNAP_CURRENT_USER_URL, cred, fetcher, OPS_UNSIGNED_HEADERS)
+    if (text === undefined) return ""
+    const data = asRecord(safeJson(text))
+    return firstOf(data.user_name, data.domain_name, data.user_id)
+  } catch {
+    return ""
+  }
+}
+
+/** The account's name, read once. Kept on the credential so magpie's
+ *  account labels (and `settle`'s dedupe) know it from then on. */
+async function accountNameOf(cred, fetcher, client) {
+  const known = firstOf(cred.user_name, cred.user_id)
+  if (known) return known
+  const name = await fetchAccountName(cred, fetcher)
+  if (name) {
+    void persistCredential(client, { ...cred, user_name: name })
+  }
+  return name
+}
+
 /** Best-effort: store a freshly refreshed credential back on the account. */
 async function persistCredential(client, cred) {
   try {
@@ -1284,6 +1325,9 @@ async function persistCredential(client, cred) {
         access: JSON.stringify(cred),
         refresh: cred.refresh_token,
         expires: expiresFromCredential(cred),
+        // magpie labels an account by this; without it every CodeArts
+        // account reads as a generic "Signed in".
+        ...(cred.user_name ? { accountId: cred.user_name } : {}),
       },
     })
   } catch {
@@ -1309,6 +1353,7 @@ export const _internal = {
   startOAuthCallbackServer, listenOnCallbackPort, startOAuthFlow,
   toBytes, isBenefitModel, rememberBenefitIds, signedFetch, signedGet,
   parseModelInfo, extractArray, fetchRemoteModels, usageFromStatistics,
+  SNAP_CURRENT_USER_URL, fetchAccountName, accountNameOf,
   signedCall, opsEnvelope, packageFlags, dailyCampaign, campaignEnded,
   positiveNumber, campaignCredit, campaignStreak,
   claimCampaign, confirmCampaign, performCheckin,
