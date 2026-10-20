@@ -71,6 +71,21 @@ SDK-HMAC-SHA256 签名，凭据由 OAuth 换取。因此本插件的 auth 与签
    - 签名与 PKCE/DPoP 全部用运行时内置 WebCrypto（`globalThis.crypto.subtle`）
      实现，不引入 `jose`；唯一的内置模块依赖是 `node:http`（本地回调服务器）。
 
+7. **每日签到（新增）**
+   - 实现 magpie 原生的 `auth.checkin` 钩子（契约见
+     `docs/subsystems/provider-plugins.md#a-plugins-daily-check-in`），由宿主的
+     Settings → Usage → Plugins 开关调度，每天每账号一次。
+   - 码道的「签到」实际是运营活动三连：`GET /v1/ops/delivery?channel=IDE` 读列表
+     → `POST /v1/ops/claim`（`campaignId` / `idempotentKey` / `channel: IDE`）
+     → `POST /v1/ops/confirm`。`claim` 只代表受理，`confirm` 才把积分从
+     `CLAIMED` 推进到 `CONFIRMED`。
+   - 状态映射：`ELIGIBLE+claimable` → claim + confirm（`claimed`）；`CLAIMED`
+     → 只补 confirm（`done`）；`CONFIRMED` / `CONSUMED` → `done`；列表里没有
+     `USER_LOGIN` → `inactive`；非积分计费账号 → `ineligible`。
+   - `/v1/ops/*` 与 `/snap-manager/*` 的前缀不同（前者挂在 snap 根上）。请求仍是
+     SDK-HMAC-SHA256 签名；`Agent-Type: PromptCenter` / `X-Language` 只追加、
+     不参与签名（参与签名会得到 `401 APIG.0301`）。
+
 ## 三、实现步骤
 
 1. 建包（本仓库为单包，插件直接放在仓库根目录），`package.json` 声明
@@ -83,7 +98,7 @@ SDK-HMAC-SHA256 签名，凭据由 OAuth 换取。因此本插件的 auth 与签
      `usage` 汇报用量。
 3. `README.md` 写安装 / 登录 / 使用 / 已知限制。
 4. `index.test.mjs` 覆盖签名、PKCE/DPoP、凭据往返、远端列表、loader 签名、
-   续期、用量、回调服务器，全程不联网（`node --test`，28 项）。
+   续期、用量、签到状态机、回调服务器，全程不联网（`node --test`，39 项）。
 5. `registry-entry.json` 提供加入 `magpie` 插件市场的登记项。
 
 ## 四、目录

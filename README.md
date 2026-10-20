@@ -4,7 +4,7 @@
 [![magpie plugin](https://img.shields.io/badge/magpie-plugin-8A2BE2)](https://usemagpie.ai/docs/zh/plugins)
 [![OpenCode plugin](https://img.shields.io/badge/OpenCode-plugin-blue)](https://opencode.ai)
 ![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-![tests](https://img.shields.io/badge/tests-28%20passing-success)
+![tests](https://img.shields.io/badge/tests-39%20passing-success)
 
 [Huawei Cloud CodeArts (华为云码道 代码智能体)](https://www.huaweicloud.com/product/codearts.html)  
 作为 magpie / OpenCode 的 provider 插件：用**华为云 OAuth 授权登录**接入码道的模型  
@@ -23,6 +23,8 @@ Key**：请求要用临时的 AK/SK/security-token 凭据做 *SDK-HMAC-SHA256* �
 3.  **静默续期**：`auth.refresh` 在凭据过期前用 `refresh_token`（复用同一把  
     `code_verifier` 与 DPoP 私钥）换新凭据。
 4.  **模型列表 / 用量**：登录后用签名 GET 拉取账号真实模型列表与积分套餐用量。
+5.  **每日签到**：实现 magpie 的 `auth.checkin` 钩子，自动领取码道的「每日签到」  
+    积分（`/v1/ops/delivery` → `claim` → `confirm`）。
 
 ## 安装
 
@@ -50,6 +52,26 @@ magpie plugin add ./index.mjs
     `openpangu-2.0-flash/pro`、`deepseek-v4-flash/pro`、`deepseek-v4.1-flash` 等；  
     登录后会以账号真实返回的列表为准。
 -   CLI 里可用 `codearts --model codearts/GLM-5.2` 之类方式指定。
+
+## 每日签到（自动领取积分）
+
+插件实现了 magpie 原生的 `auth.checkin` 钩子（需要 magpie ≥ v0.1.1083）：
+
+-   打开 **Settings → Usage → Plugins** 里 CodeArts 的 **Daily check-in** 开关后，  
+    magpie 每个北京时间自然日会为每个已登录账号自动签到一次（启动 2 分钟后首查、  
+    之后每 30 分钟轮询；失败 30 分钟后重试）。默认是关的。
+-   账户的 Usage 卡片上可以直接 **Check in now** 手动签；结果显示在卡片里。
+-   命令行 `magpie accounts checkin` / TUI 的 Usage 页也可以用。
+
+码道的签到不是一次请求，而是一套运营活动流程：
+
+1.  `GET /v1/ops/delivery?channel=IDE` 读活动列表，挑出 `type=USER_LOGIN` 的每日签到；
+2.  可领取时 `POST /v1/ops/claim`（带 `campaignId` / `idempotentKey` / `channel`）；
+3.  再 `POST /v1/ops/confirm` 把积分从「待确认」推进到账。
+
+因此插件对 `ELIGIBLE` / `CLAIMED` / `CONFIRMED` / `CONSUMED` 四种状态分别处理：  
+已领未确认（`CLAIMED`）只补 confirm，已确认则报告「今日已签到」，不会重复领取。  
+Token 计费账号不在活动范围内，会返回 `ineligible`。
 
 ## 说明与已知限制
 
@@ -101,6 +123,11 @@ Models appear as `codearts/GLM-5.2`, `codearts/glm-5.3-flash`, `codearts/openpan
 - Region/endpoint is fixed to Huawei Cloud `cn-north-4`.
 - `benefit` (free-quota) models are detected automatically and sent with a signed `maas_type: benefit` header.
 - Usage is best-effort, read from the credits endpoint.
+- Daily check-in: the plugin implements magpie's `auth.checkin` hook (magpie ≥ v0.1.1083).
+  Turn on **Daily check-in** under **Settings → Usage → Plugins**, or press **Check in now**
+  on the account's Usage card. CodeArts' check-in is an ops campaign
+  (`/v1/ops/delivery` → `claim` → `confirm`), so a claimed-but-unconfirmed campaign gets
+  its confirm completed on the next run rather than being reported as done.
 - No MCP / gateway middleware — model access only.
 
 ## License

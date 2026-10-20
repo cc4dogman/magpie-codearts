@@ -387,6 +387,187 @@ test("auth.usage reports the plan's credit window", async () => {
   ])
 })
 
+// ---- daily check-in --------------------------------------------------------
+
+const dailyItem = (over = {}) => ({
+  campaignId: 1,
+  type: "USER_LOGIN",
+  claimable: true,
+  status: "ELIGIBLE",
+  benefitAmount: 100,
+  benefitUnit: "CREDIT",
+  title: "Daily Check-in: Claim 100 Credits",
+  ...over,
+})
+
+const deliveryBody = (item = dailyItem()) => ({ code: 0, data: { items: [item] } })
+
+function checkinFetcher({
+  stats = { package: { is_credit_package: true } },
+  delivery = deliveryBody(),
+  claim = { code: 0, data: { campaignId: 1, id: "claim-id" } },
+  confirm = { code: 0, data: {} },
+  status = 200,
+} = {}) {
+  const seen = []
+  const fetcher = async (url, init = {}) => {
+    const target = String(url)
+    seen.push({ url: target, method: init.method, headers: new Headers(init.headers), body: init.body })
+    const reply = (body, httpStatus = status) => new Response(
+      typeof body === "string" ? body : JSON.stringify(body),
+      { status: httpStatus },
+    )
+    if (target.endsWith("/snap-manager/v1/statistics/plugin")) return reply(stats)
+    if (target.includes("/v1/ops/delivery")) return reply(delivery)
+    if (target.endsWith("/v1/ops/claim")) return reply(claim)
+    if (target.endsWith("/v1/ops/confirm")) return reply(confirm)
+    return reply("not found", 404)
+  }
+  return { fetcher, seen }
+}
+
+test("auth.checkin claims and confirms the daily campaign", async () => {
+  const cred = await makeCred()
+  const { fetcher, seen } = checkinFetcher()
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+
+  const result = await plugin.auth.checkin(async () => makeAuth(cred))
+  assert.deepEqual(result, { outcome: "claimed", credit: 100, message: "已签到 +100" })
+
+  const delivery = seen.find((s) => s.url.includes("/v1/ops/delivery"))
+  assert.equal(delivery.url, "https://snap-access.cn-north-4.myhuaweicloud.com/v1/ops/delivery?channel=IDE")
+  assert.equal(delivery.method, "GET")
+  assert.equal(delivery.headers.get("Agent-Type"), "PromptCenter")
+  assert.equal(delivery.headers.get("X-Language"), "zh-cn")
+  assert.match(delivery.headers.get("authorization"), /^SDK-HMAC-SHA256 Access=AK,/)
+  // Agent-Type / X-Language are appended after signing, never signed.
+  assert.equal(delivery.headers.get("authorization").includes("agent-type"), false)
+  assert.equal(delivery.headers.get("authorization").includes("x-language"), false)
+
+  const claim = seen.find((s) => s.url.endsWith("/v1/ops/claim"))
+  const claimBody = JSON.parse(claim.body)
+  // The delivered id is a number and must be sent back as a number.
+  assert.equal(claimBody.campaignId, 1)
+  assert.equal(claimBody.channel, "IDE")
+  assert.match(claimBody.idempotentKey, /^claim_1_\d+_[0-9a-f]{8}$/)
+  assert.equal(claim.headers.get("content-type"), "application/json")
+  assert.match(
+    claim.headers.get("authorization"),
+    /SignedHeaders=content-type;host;x-sdk-content-sha256;x-sdk-date;x-security-token,/,
+  )
+
+  const confirm = seen.find((s) => s.url.endsWith("/v1/ops/confirm"))
+  assert.deepEqual(JSON.parse(confirm.body), { campaignId: 1 })
+})
+
+test("auth.checkin reports an already-confirmed campaign as done without writing", async () => {
+  const cred = await makeCred()
+  const { fetcher, seen } = checkinFetcher({
+    delivery: deliveryBody(dailyItem({ claimable: false, status: "CONFIRMED" })),
+  })
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+
+  assert.deepEqual(
+    await plugin.auth.checkin(async () => makeAuth(cred)),
+    { outcome: "done", credit: 100, message: "今日已签到" },
+  )
+  assert.equal(seen.some((s) => s.method === "POST"), false)
+})
+
+test("auth.checkin finishes a CLAIMED campaign with confirm only", async () => {
+  const cred = await makeCred()
+  const { fetcher, seen } = checkinFetcher({
+    delivery: deliveryBody(dailyItem({ claimable: false, status: "CLAIMED" })),
+  })
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+
+  const result = await plugin.auth.checkin(async () => makeAuth(cred))
+  assert.equal(result.outcome, "done")
+  assert.equal(result.message, "已补确认签到")
+  const writes = seen.filter((s) => s.method === "POST")
+  assert.equal(writes.length, 1)
+  assert.ok(writes[0].url.endsWith("/v1/ops/confirm"))
+})
+
+test("auth.checkin is inactive when the daily activity is absent", async () => {
+  const cred = await makeCred()
+  const { fetcher, seen } = checkinFetcher({
+    delivery: { code: 0, data: { items: [{ campaignId: 4, type: "NEW_USER_REGISTER", claimable: true }] } },
+  })
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+
+  assert.deepEqual(
+    await plugin.auth.checkin(async () => makeAuth(cred)),
+    { outcome: "inactive", message: "当前没有每日签到活动" },
+  )
+  assert.equal(seen.some((s) => s.method === "POST"), false)
+})
+
+test("auth.checkin is ineligible for a token-billed account", async () => {
+  const cred = await makeCred()
+  const { fetcher, seen } = checkinFetcher({
+    stats: { package: { is_credit_package: false, is_token_package: true } },
+  })
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+
+  const result = await plugin.auth.checkin(async () => makeAuth(cred))
+  assert.equal(result.outcome, "ineligible")
+  assert.match(result.message, /Token 计费账户/)
+  // The campaign is never read for an account outside its scope.
+  assert.equal(seen.some((s) => s.url.includes("/v1/ops/")), false)
+})
+
+test("auth.checkin surfaces a claim business code as failed", async () => {
+  const cred = await makeCred()
+  const { fetcher, seen } = checkinFetcher({ claim: { code: 40001, message: "尚未到达权益刷新时间" } })
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+
+  const result = await plugin.auth.checkin(async () => makeAuth(cred))
+  assert.equal(result.outcome, "failed")
+  assert.match(result.message, /尚未到达权益刷新时间/)
+  // A refused claim must not reach confirm.
+  assert.equal(seen.some((s) => s.url.endsWith("/v1/ops/confirm")), false)
+})
+
+test("auth.checkin does not report success when confirm fails", async () => {
+  const cred = await makeCred()
+  const { fetcher } = checkinFetcher({ confirm: { code: 500, message: "confirm broke" } })
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+
+  const result = await plugin.auth.checkin(async () => makeAuth(cred))
+  assert.equal(result.outcome, "failed")
+  assert.match(result.message, /签到确认失败/)
+})
+
+test("auth.checkin marks an expired sign-in from HTTP 401", async () => {
+  const cred = await makeCred()
+  const fetcher = async () => new Response("Unauthorized", { status: 401 })
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+
+  const result = await plugin.auth.checkin(async () => makeAuth(cred))
+  assert.equal(result.outcome, "failed")
+  assert.equal(result.signIn, "expired")
+})
+
+test("auth.checkin returns failed when not signed in", async () => {
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, {})
+  assert.deepEqual(
+    await plugin.auth.checkin(async () => ({ type: "api", key: "k" })),
+    { outcome: "failed", message: "not signed in" },
+  )
+})
+
+test("dailyCampaign prefers USER_LOGIN and ignores non-credit units", () => {
+  const items = [
+    { campaignId: 2, type: "STUDENT_CERTIFIED", claimable: true },
+    { campaignId: 3, type: "USER_LOGIN", claimable: true, benefitUnit: "TOKEN" },
+    { campaignId: 1, type: "USER_LOGIN", claimable: true, benefitUnit: "CREDIT" },
+  ]
+  assert.equal(x.dailyCampaign(items).campaignId, 1)
+  assert.equal(x.dailyCampaign([{ campaignId: 1, type: "DAILY_CLAIM" }]).campaignId, 1)
+  assert.equal(x.dailyCampaign([{ campaignId: 2, type: "STUDENT_CERTIFIED" }]), undefined)
+})
+
 // ---- OAuth callback server -------------------------------------------------
 
 test("startOAuthFlow serves a callback server and a valid login URL", async () => {

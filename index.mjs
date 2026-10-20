@@ -49,6 +49,14 @@ const SNAP_HOST = "https://snap-access.cn-north-4.myhuaweicloud.com"
 const SNAP_MODEL_BUILTIN_URL = `${SNAP_HOST}/v1/model/builtin`
 const SNAP_STATISTICS_URL = `${SNAP_HOST}/snap-manager/v1/statistics/plugin`
 const CREDENTIAL_ENDPOINT = `${SNAP_HOST}/snap-manager/v1/login/ticket`
+// Daily check-in ("每日签到领积分") is an ops campaign, not a plain sign-in:
+// read the activity list, claim the daily one, then confirm it. Note the
+// prefix: `/v1/ops/*` hangs off the snap root, while statistics and the
+// ticket endpoint need `/snap-manager` (the wrong prefix answers APIG.0101).
+const SNAP_OPS_DELIVERY_URL = `${SNAP_HOST}/v1/ops/delivery?channel=IDE`
+const SNAP_OPS_CLAIM_URL = `${SNAP_HOST}/v1/ops/claim`
+const SNAP_OPS_CONFIRM_URL = `${SNAP_HOST}/v1/ops/confirm`
+const OPS_CHANNEL = "IDE"
 // opengw gateway config: the benefit/free-quota model set.
 const OPENGW_GATEWAY_CONFIG_URL = "https://opengw.developer.huaweicloud.com/api/v1/gateway/config"
 // OAuth portal (new IAM flow) and the STS token endpoint.
@@ -798,6 +806,235 @@ function usageFromStatistics(raw) {
   return { plan: plan || undefined, windows, error: "该账号无积分额度" }
 }
 
+// ---- daily check-in --------------------------------------------------------
+
+// Agent-Type / X-Language are required by the ops endpoints but must NOT be
+// signed: once they enter SignedHeaders, Huawei answers 401 APIG.0301.
+const OPS_UNSIGNED_HEADERS = {
+  "Agent-Type": "PromptCenter",
+  "X-Language": "zh-cn",
+}
+
+// The daily activity's `type`. The IDE client and the web client have both
+// been seen using USER_LOGIN (DAILY_CLAIM is the other name in its constants).
+const DAILY_LOGIN_TYPES = ["USER_LOGIN", "DAILY_CLAIM"]
+const CHECKIN_CLAIMED_STATUS = "CLAIMED" // claimed but not confirmed
+const CHECKIN_DONE_STATUSES = ["CONFIRMED", "CONSUMED"]
+
+/**
+ * One signed request to the snap business endpoints. Network failures throw;
+ * HTTP failures are reported back so the caller can tell 401 apart from a
+ * business code. `body` is signed and sent verbatim (never re-serialized).
+ */
+async function signedCall(method, url, cred, body, fetcher, appendedHeaders) {
+  const bodyText = body ?? ""
+  const bodyBytes = method === "GET" ? new Uint8Array() : utf8(bodyText)
+  const signed = await signRequestHuawei(
+    cred.access_key_id, cred.secret_access_key, cred.security_token,
+    method, url, bodyBytes,
+  )
+  const headers = new Headers()
+  signed.forEach((value, key) => {
+    if (key !== "host") headers.set(key, value)
+  })
+  if (appendedHeaders !== undefined) {
+    for (const [k, v] of Object.entries(appendedHeaders)) headers.set(k, v)
+  }
+  const res = await fetcher(url, {
+    method,
+    headers,
+    ...(method === "GET" ? {} : { body: bodyText }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  })
+  return { status: res.status, ok: res.ok, text: await res.text() }
+}
+
+/**
+ * Read the `{ code, message, data }` envelope the ops endpoints answer with.
+ * A missing `code` is treated as a bare data object (statistics answers that
+ * way); a non-zero code is a business failure even on HTTP 200.
+ */
+function opsEnvelope(text) {
+  const root = safeJson(text)
+  if (!root) return { ok: false, message: "CodeArts 活动接口响应不是合法 JSON" }
+  const raw = root.code
+  const code = typeof raw === "number"
+    ? raw
+    : typeof raw === "string" && raw.trim() ? Number(raw) : undefined
+  if (code !== undefined && Number.isFinite(code) && code !== 0) {
+    return { ok: false, code, message: firstOf(root.message, root.msg, `CodeArts 业务码 ${code}`) }
+  }
+  return { ok: true, data: root.data !== undefined ? root.data : root }
+}
+
+/** Whether the account is billed by credits (the check-in campaign's scope). */
+function packageFlags(root) {
+  const holder = asRecord(root)
+  const data = holder.data !== undefined ? asRecord(holder.data) : holder
+  const pkg = asRecord(data.package)
+  return {
+    known: typeof pkg.is_credit_package === "boolean",
+    credit: pkg.is_credit_package === true,
+    token: pkg.is_token_package === true,
+  }
+}
+
+/** The daily check-in entry from a delivery list, or undefined. */
+function dailyCampaign(items) {
+  const list = items.filter((item) => {
+    if (typeof item !== "object" || item === null) return false
+    const unit = firstOf(item.benefitUnit).toUpperCase()
+    return !unit || unit === "CREDIT"
+  })
+  for (const type of DAILY_LOGIN_TYPES) {
+    const found = list.find((item) => String(item.type ?? "").toUpperCase() === type)
+    if (found) return found
+  }
+  return undefined
+}
+
+/** The campaign's own end time has passed (its daily reset is a different thing). */
+function campaignEnded(campaign) {
+  const end = firstOf(campaign?.extra?.endTime)
+  if (!end) return false
+  const at = Date.parse(end)
+  return Number.isFinite(at) && at <= Date.now()
+}
+
+function positiveNumber(...values) {
+  for (const value of values) {
+    const n = num(value)
+    if (n > 0) return n
+  }
+  return undefined
+}
+
+const campaignCredit = (c) => positiveNumber(
+  c?.benefitAmount, c?.amount, c?.pendingTotalAmount,
+  c?.extra?.benefitAmount, c?.extra?.pendingTotalAmount,
+)
+
+const campaignStreak = (c) => positiveNumber(
+  c?.continuousDays, c?.continuous_days, c?.streakDays, c?.streak,
+  c?.extra?.continuousDays, c?.extra?.streakDays,
+)
+
+/** POST /v1/ops/claim for one campaign, preserving the id's original JSON type. */
+async function claimCampaign(cred, campaign, fetcher) {
+  const id = campaign?.campaignId
+  if (id === undefined || id === null || id === "") return { ok: false, message: "活动缺少 campaignId" }
+  const body = JSON.stringify({
+    campaignId: id,
+    idempotentKey: `claim_${String(id)}_${Date.now()}_${randomHex(4)}`,
+    channel: OPS_CHANNEL,
+  })
+  const res = await signedCall("POST", SNAP_OPS_CLAIM_URL, cred, body, fetcher, OPS_UNSIGNED_HEADERS)
+  if (res.status === 401 || res.status === 403) return { ok: false, signIn: "expired", message: `HTTP ${res.status}` }
+  if (!res.ok) return { ok: false, message: `HTTP ${res.status}` }
+  const env = opsEnvelope(res.text)
+  if (!env.ok) return { ok: false, message: env.message }
+  // Confirming a different campaign would settle somebody else's claim.
+  const returned = env.data?.campaignId
+  if (returned !== undefined && String(returned) !== String(id)) {
+    return { ok: false, message: `领取响应活动 ID 不匹配（要 ${id}，回 ${returned}）` }
+  }
+  return { ok: true }
+}
+
+/** POST /v1/ops/confirm — the second half; without it credits stay pending. */
+async function confirmCampaign(cred, campaignId, fetcher) {
+  if (campaignId === undefined || campaignId === null || campaignId === "") {
+    return { ok: false, message: "活动缺少 campaignId" }
+  }
+  const res = await signedCall(
+    "POST", SNAP_OPS_CONFIRM_URL, cred, JSON.stringify({ campaignId }), fetcher, OPS_UNSIGNED_HEADERS,
+  )
+  if (res.status === 401 || res.status === 403) return { ok: false, signIn: "expired", message: `HTTP ${res.status}` }
+  if (!res.ok) return { ok: false, message: `HTTP ${res.status}` }
+  const env = opsEnvelope(res.text)
+  return env.ok ? { ok: true } : { ok: false, message: env.message }
+}
+
+/**
+ * magpie's `auth.checkin` implementation: the three-step ops flow.
+ *
+ * Outcomes follow magpie's contract — claimed (checked in now), done (already
+ * today), ineligible (account not in the campaign), inactive (no campaign),
+ * failed (retry later). `CONFIRMED`/`CONSUMED` means today is done; `CLAIMED`
+ * means the first half ran but the credits are still pending, so only the
+ * confirm is sent. A claim is never treated as success by itself.
+ */
+async function performCheckin(cred, fetcher) {
+  // The campaign is for credit-billed accounts. A failed precheck must not
+  // block the check-in itself, so only an explicit "not credit" stops it.
+  try {
+    const stats = await signedCall("GET", SNAP_STATISTICS_URL, cred, undefined, fetcher, OPS_UNSIGNED_HEADERS)
+    if (stats.ok) {
+      const flags = packageFlags(safeJson(stats.text))
+      if (flags.known && !flags.credit) {
+        return {
+          outcome: "ineligible",
+          message: flags.token
+            ? "该账号是 Token 计费账户，不在每日签到活动范围内"
+            : "该账号不是积分计费账户，不在每日签到活动范围内",
+        }
+      }
+    }
+  } catch {
+    /* best effort */
+  }
+
+  let delivery
+  try {
+    delivery = await signedCall("GET", SNAP_OPS_DELIVERY_URL, cred, undefined, fetcher, OPS_UNSIGNED_HEADERS)
+  } catch (e) {
+    return { outcome: "failed", message: e?.message ?? String(e) }
+  }
+  if (delivery.status === 401 || delivery.status === 403) {
+    return { outcome: "failed", signIn: "expired", message: `登录已失效（HTTP ${delivery.status}），请重新登录` }
+  }
+  if (!delivery.ok) return { outcome: "failed", message: `活动列表请求失败（HTTP ${delivery.status}）` }
+  const env = opsEnvelope(delivery.text)
+  if (!env.ok) return { outcome: "failed", message: env.message }
+  const items = Array.isArray(env.data?.items) ? env.data.items : undefined
+  if (!items) return { outcome: "failed", message: "活动列表响应缺少 items" }
+
+  const campaign = dailyCampaign(items)
+  if (!campaign) return { outcome: "inactive", message: "当前没有每日签到活动" }
+  if (campaignEnded(campaign)) return { outcome: "inactive", message: "官方签到活动已结束" }
+
+  const status = firstOf(campaign.status).toUpperCase()
+  const credit = campaignCredit(campaign)
+  const streak = campaignStreak(campaign)
+  const reward = {
+    ...(credit !== undefined ? { credit } : {}),
+    ...(streak !== undefined ? { streak } : {}),
+  }
+
+  if (campaign.claimable !== true) {
+    if (status === CHECKIN_CLAIMED_STATUS) {
+      // Claimed, not confirmed: finish it rather than reporting today as done.
+      const confirmed = await confirmCampaign(cred, campaign.campaignId, fetcher)
+      if (!confirmed.ok) {
+        return { outcome: "failed", ...(confirmed.signIn ? { signIn: confirmed.signIn } : {}), message: `签到确认失败：${confirmed.message}` }
+      }
+      return { outcome: "done", ...reward, message: "已补确认签到" }
+    }
+    if (CHECKIN_DONE_STATUSES.includes(status)) return { outcome: "done", ...reward, message: "今日已签到" }
+    return { outcome: "failed", message: `活动当前不可领取（status=${status || "未知"}）` }
+  }
+
+  const claim = await claimCampaign(cred, campaign, fetcher)
+  if (!claim.ok) {
+    return { outcome: "failed", ...(claim.signIn ? { signIn: claim.signIn } : {}), message: `签到领取失败：${claim.message}` }
+  }
+  const confirmed = await confirmCampaign(cred, campaign.campaignId, fetcher)
+  if (!confirmed.ok) {
+    return { outcome: "failed", ...(confirmed.signIn ? { signIn: confirmed.signIn } : {}), message: `签到确认失败：${confirmed.message}` }
+  }
+  return { outcome: "claimed", ...reward, message: credit !== undefined ? `已签到 +${credit}` : "已签到" }
+}
+
 // ---- the plugin -------------------------------------------------------------
 
 export const CodeArtsAuthPlugin = async ({ client } = {}, options = {}) => {
@@ -915,6 +1152,24 @@ export const CodeArtsAuthPlugin = async ({ client } = {}, options = {}) => {
         }
       },
 
+      // magpie's own hook: the vendor's daily check-in (每日签到领积分).
+      // Called once a Beijing day per signed-in account once the user turns
+      // the provider's Daily check-in switch on; "Check in now" asks on demand.
+      async checkin(getAuth) {
+        const auth = await getAuth()
+        const cred = credentialOf(auth)
+        if (!cred?.access_key_id) return { outcome: "failed", message: "not signed in" }
+        try {
+          return await performCheckin(cred, fetcher)
+        } catch (e) {
+          return {
+            outcome: "failed",
+            message: e?.message ?? String(e),
+            ...(e?.signIn ? { signIn: e.signIn } : {}),
+          }
+        }
+      },
+
       methods: [
         {
           type: "oauth",
@@ -973,6 +1228,8 @@ async function persistCredential(client, cred) {
 export const _internal = {
   PROVIDER, NPM, CATALOG, CONTEXT_WINDOWS, BENEFIT_MODEL_FALLBACK,
   CHAT_API_BASE, SNAP_MODEL_BUILTIN_URL, SNAP_STATISTICS_URL, OPENGW_GATEWAY_CONFIG_URL,
+  SNAP_OPS_DELIVERY_URL, SNAP_OPS_CLAIM_URL, SNAP_OPS_CONFIRM_URL, OPS_CHANNEL,
+  OPS_UNSIGNED_HEADERS, DAILY_LOGIN_TYPES, CHECKIN_CLAIMED_STATUS, CHECKIN_DONE_STATUSES,
   PORTAL_AUTHORIZE_BASE, STS_TOKEN_ENDPOINT, CLIENT_ID, REDIRECT_PATH,
   firstOf, asRecord, safeJson, num, clamp, prettify, normalizeModelId, formatCredit,
   b64url, utf8, sha256Hex, hmacSha256Hex,
@@ -984,4 +1241,7 @@ export const _internal = {
   startOAuthCallbackServer, listenOnCallbackPort, startOAuthFlow,
   toBytes, isBenefitModel, rememberBenefitIds, signedFetch, signedGet,
   parseModelInfo, extractArray, fetchRemoteModels, usageFromStatistics,
+  signedCall, opsEnvelope, packageFlags, dailyCampaign, campaignEnded,
+  positiveNumber, campaignCredit, campaignStreak,
+  claimCampaign, confirmCampaign, performCheckin,
 }
