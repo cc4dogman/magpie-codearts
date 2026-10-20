@@ -59,6 +59,8 @@ SDK-HMAC-SHA256 签名，凭据由 OAuth 换取。因此本插件的 auth 与签
 
 4. **端点固定为华为云 cn-north-4**
    - Chat Completions 基址 `https://snap-access.cn-north-4.myhuaweicloud.com/api/v2`。
+   - 每账号并发取码道默认的 2（`maxConcurrency`），经 `auth` 钩子与
+     `package.json` 的 `magpie.maxConcurrency` 同时声明。
 
 5. **模型目录与用量**
    - 目录换成码道真实模型，并带真实上下文窗口（见 README）。

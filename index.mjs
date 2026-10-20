@@ -98,6 +98,10 @@ const LOGIN_POLL_ATTEMPTS = 120
 // Renew this long before the credential expires.
 const REFRESH_LEAD_MS = 30 * 60 * 1000
 
+// Requests one account may have in flight at once. CodeArts counts busy
+// sessions per account and refuses past the cap; 2 is its default.
+const MAX_CONCURRENCY = 2
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -1138,7 +1142,10 @@ export const CodeArtsAuthPlugin = async ({ client } = {}, options = {}) => {
     auth: {
       provider: PROVIDER,
       refreshLead: REFRESH_LEAD_MS,
-      maxConcurrency: 4,
+      // CodeArts' default concurrency for one account. The gateway counts
+      // busy sessions per account and refuses past the cap, so this stays
+      // at the vendor's own default rather than the plugin's old 4.
+      maxConcurrency: MAX_CONCURRENCY,
 
       // magpie's own hook: renew the temporary credentials before they expire.
       async refresh(auth) {
@@ -1343,6 +1350,7 @@ export const _internal = {
   OPS_UNSIGNED_HEADERS, DAILY_LOGIN_TYPES, CHECKIN_CLAIMED_STATUS, CHECKIN_DONE_STATUSES,
   PORTAL_AUTHORIZE_BASE, STS_TOKEN_ENDPOINT, CLIENT_ID, REDIRECT_PATH,
   CHAT_HOME_URL, POST_LOGIN_CHOICES, isHttpUrl, postLoginRedirect,
+  MAX_CONCURRENCY, REFRESH_LEAD_MS,
   firstOf, asRecord, safeJson, num, clamp, prettify, normalizeModelId, formatCredit,
   b64url, utf8, sha256Hex, hmacSha256Hex,
   generatePkcePair, generateDpopKeyPair, keyPairFromStoredJwk, signDpopJws,

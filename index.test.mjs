@@ -275,6 +275,8 @@ test("plugin exposes config, provider.models, and an oauth auth method", async (
   assert.equal(plugin.auth.provider, "codearts")
   assert.equal(plugin.auth.methods.length, 1)
   assert.equal(plugin.auth.methods[0].type, "oauth")
+  // CodeArts' own default: two requests in flight per account.
+  assert.equal(plugin.auth.maxConcurrency, 2)
 
   const config = {}
   await plugin.config(config)
