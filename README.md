@@ -5,7 +5,7 @@
 [![OpenCode plugin](https://img.shields.io/badge/OpenCode-plugin-blue)](https://opencode.ai)
 ![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 ![tests](https://img.shields.io/badge/tests-46%20passing-success)
-![version](https://img.shields.io/badge/version-0.2.1-blue)
+![version](https://img.shields.io/badge/version-0.2.2-blue)
 
 [Huawei Cloud CodeArts (华为云码道 代码智能体)](https://www.huaweicloud.com/product/codearts.html)  
 作为 magpie / OpenCode 的 provider 插件：用**华为云 OAuth 授权登录**接入码道的模型  
@@ -108,6 +108,37 @@ Token 计费账号不在活动范围内，会返回 `ineligible`。
 -   本插件不内置 MCP / 中间件，仅做模型接入。
 -   依赖：无（签名、PKCE、DPoP 都用运行时内置的 WebCrypto，无需 `jose` 等三方库）。
 
+## 更新说明
+
+### 0.2.2
+
+仓库迁移与文档整理，代码行为不变。
+
+-   仓库地址改为 <https://github.com/sanjie83/magpie-codearts>（GitHub 账号改名），  
+    `package.json` 的 `repository` / `homepage` / `bugs` 与文档里的安装命令都已同步。
+-   安装命令：`magpie plugin add sanjie83/magpie-codearts`。
+-   `DESIGN.md` 补充 `auth.checkin` 与仓库/发布信息；`LICENSE` 增加新维护者署名  
+    （保留原作者）。
+-   无功能改动，无需重新登录。
+
+### 0.2.1
+
+首个带每日签到的版本。
+
+-   **每日签到**：实现 magpie 原生 `auth.checkin`，自动领取码道「每日签到」积分  
+    （`/v1/ops/delivery` → `claim` → `confirm`）；已领未确认会补确认，Token 计费  
+    账号返回 `ineligible`。
+-   **登录后落点可选**：码道聊天首页（默认）、官方登录结果页、或自定义 URL。
+-   **用量卡片显示账号名**：读 `snap-manager/v1/current/user`，不再显示通用的  
+    “Signed in”；旧账号在下次读用量时自动补上。
+-   **并发默认 2**（码道自己的默认值）。
+-   包名改为 `magpie-codearts`，provider id 仍为 `codearts`，登录态与模型选择不受影响。
+
+### 0.1.0
+
+-   通过华为云 OAuth（PKCE + DPoP）登录接入码道模型，请求用 SDK-HMAC-SHA256 签名；
+    支持静默续期、真实模型列表与积分用量。
+
 ## English
 
 **magpie-codearts** is a magpie / OpenCode provider plugin that signs you in to
@@ -155,6 +186,39 @@ Models appear as `codearts/GLM-5.2`, `codearts/glm-5.3-flash`, `codearts/openpan
   (`/v1/ops/delivery` → `claim` → `confirm`), so a claimed-but-unconfirmed campaign gets
   its confirm completed on the next run rather than being reported as done.
 - No MCP / gateway middleware — model access only.
+
+## Changelog
+
+### 0.2.2
+
+Repository move and documentation only; no behavior changes.
+
+- The repository is now <https://github.com/sanjie83/magpie-codearts> (the GitHub account was
+  renamed); `repository`/`homepage`/`bugs` and the install commands in the docs follow it.
+- Install with `magpie plugin add sanjie83/magpie-codearts`.
+- `DESIGN.md` documents `auth.checkin` and the repo/release layout; `LICENSE` adds the new
+  maintainer beside the original author.
+- Nothing functional changed — no need to sign in again.
+
+### 0.2.1
+
+The first release with daily check-in.
+
+- **Daily check-in** through magpie's `auth.checkin`
+  (`/v1/ops/delivery` → `claim` → `confirm`); a claimed-but-unconfirmed campaign is confirmed
+  on the next run, and token-billed accounts read `ineligible`.
+- **Post-login page**: the CodeArts chat homepage (default), the official portal result page,
+  or a custom URL.
+- **Account names on the usage card**, read from `current/user`; existing accounts get named on
+  their next usage read.
+- **Two requests per account**, CodeArts' own default.
+- The package is `magpie-codearts`; the provider id stays `codearts`, so sign-ins and picks
+  keep working.
+
+### 0.1.0
+
+- Huawei Cloud OAuth (PKCE + DPoP) sign-in, SDK-HMAC-SHA256 signed requests, silent refresh,
+  the account's live model list and credit usage.
 
 ## License
 
