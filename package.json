@@ -13,11 +13,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cc4dogman/magpie-codearts.git"
+    "url": "git+https://github.com/sanjie83/magpie-codearts.git"
   },
-  "homepage": "https://github.com/cc4dogman/magpie-codearts#readme",
+  "homepage": "https://github.com/sanjie83/magpie-codearts#readme",
   "bugs": {
-    "url": "https://github.com/cc4dogman/magpie-codearts/issues"
+    "url": "https://github.com/sanjie83/magpie-codearts/issues"
   },
   "magpie": {
     "maxConcurrency": 2,

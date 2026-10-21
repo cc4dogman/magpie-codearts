@@ -5,10 +5,13 @@
 [![OpenCode plugin](https://img.shields.io/badge/OpenCode-plugin-blue)](https://opencode.ai)
 ![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 ![tests](https://img.shields.io/badge/tests-46%20passing-success)
+![version](https://img.shields.io/badge/version-0.2.1-blue)
 
 [Huawei Cloud CodeArts (华为云码道 代码智能体)](https://www.huaweicloud.com/product/codearts.html)  
 作为 magpie / OpenCode 的 provider 插件：用**华为云 OAuth 授权登录**接入码道的模型  
 （盘古 openPangu、DeepSeek、GLM 等）。
+
+> 仓库：<https://github.com/sanjie83/magpie-codearts>
 
 CodeArts 的模型网关确实是 OpenAI 兼容的 Chat Completions 接口，但它**不接受 API  
 Key**：请求要用临时的 AK/SK/security-token 凭据做 *SDK-HMAC-SHA256* 签名，而这些  
@@ -30,7 +33,7 @@ Key**：请求要用临时的 AK/SK/security-token 凭据做 *SDK-HMAC-SHA256* �
 ## 安装
 
 ```sh
-magpie plugin add cc4dogman/magpie-codearts
+magpie plugin add sanjie83/magpie-codearts
 
 ```
 
@@ -119,7 +122,7 @@ local-callback PKCE OAuth, per-request SDK-HMAC-SHA256 signing, silent refresh �
 ### Install
 
 ```sh
-magpie plugin add cc4dogman/magpie-codearts
+magpie plugin add sanjie83/magpie-codearts
 ```
 
 ### Sign in
@@ -143,7 +146,9 @@ Models appear as `codearts/GLM-5.2`, `codearts/glm-5.3-flash`, `codearts/openpan
 
 - Region/endpoint is fixed to Huawei Cloud `cn-north-4`.
 - `benefit` (free-quota) models are detected automatically and sent with a signed `maas_type: benefit` header.
-- Usage is best-effort, read from the credits endpoint.
+- Usage is best-effort, read from the credits endpoint; the account's name comes from
+  `/snap-manager/v1/current/user`, so the Usage card names the account rather than "Signed in".
+- Two requests in flight per account (CodeArts' own default).
 - Daily check-in: the plugin implements magpie's `auth.checkin` hook (magpie ≥ v0.1.1083).
   Turn on **Daily check-in** under **Settings → Usage → Plugins**, or press **Check in now**
   on the account's Usage card. CodeArts' check-in is an ops campaign

@@ -109,13 +109,16 @@ SDK-HMAC-SHA256 签名，凭据由 OAuth 换取。因此本插件的 auth 与签
      为空或等于旧默认值 `CodeArts` 时替换为 `CodeArts (magpie-codearts)`。
      Provider id 保持 `codearts`（登录态不变），与旧的 `yuweihao17/codearts` 插件区分。
    - `provider.models`：签名拉取两个远端端点，失败回退目录。
-   - `auth`：`methods` 提供 OAuth 登录，`loader` 签名请求，`refresh` 续期，
-     `usage` 汇报用量。
+   - `auth`：`methods` 提供 OAuth 登录（含登录后落点提问），`loader` 签名请求，
+     `refresh` 续期，`usage` 汇报用量，`checkin` 每日签到。
 3. `README.md` 写安装 / 登录 / 使用 / 已知限制。
 4. `index.test.mjs` 覆盖签名、PKCE/DPoP、凭据往返、远端列表、loader 签名、
    续期、用量、账号名读取、签到状态机、登录后落点选择、回调服务器，全程不联网
    （`node --test`，46 项）。
 5. `registry-entry.json` 提供加入 `magpie` 插件市场的登记项。
+6. 仓库：<https://github.com/sanjie83/magpie-codearts>（由 `yuweihao17/codearts` fork
+   而来，`LICENSE` 保留原作者署名）。安装用
+   `magpie plugin add sanjie83/magpie-codearts`，本地开发用该仓库路径。
 
 ## 四、目录
 
